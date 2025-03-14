@@ -12,6 +12,41 @@ This implementation plan outlines the process for integrating our reasoning patt
 6. **UI Components:** Integrate generative UI finance components
 7. **Reasoning Pattern:** Implement structured reasoning with a lead orchestrator
 
+## STARTING DIRECTORY
+# Libraries Map
+
+This document provides a map of the `app/`, `components/`, and `lib/` directories, including a brief description of each file.
+
+## app/
+
+*   **api/**: Contains API route(s).
+    *   **chat/**: Contains chat API route(s).
+        *   `route.ts`: Handles the chat API logic.
+*   `favicon.ico`: The favicon for the website.
+*   `globals.css`: Global CSS file for styling the application.
+*   `layout.tsx`: Defines the root layout for the application.
+*   `opengraph-image.png`: The Open Graph image for the website.
+*   `page.tsx`: The main page component for the application.
+*   `twitter-image.png`: The Twitter image for the website.
+
+## components/
+
+*   `chat.tsx`: The main chat component.
+*   `deploy-button.tsx`: A component that renders a button to deploy the application to Vercel.
+*   `footnote.tsx`: A component that renders a footnote with links to Next.js and the AI SDK.
+*   `icons.tsx`: Defines various icons used in the application.
+*   `input.tsx`: The input component for the chat interface.
+*   `markdown-components.tsx`: Defines custom components for rendering Markdown.
+*   `messages.tsx`: Renders the messages in the chat interface.
+*   `star-button.tsx`: A component that renders a button to star the project on GitHub.
+
+## lib/
+
+*   `models.ts`: Defines the available language models and their configurations.
+
+
+
+
 ## Implementation Plan
 
 ### Phase 1: Model System and Tool Registry (Foundation)
@@ -851,473 +886,581 @@ export async function reliableSearch(query: string): Promise<{
 }
 ```
 
-#### 2.2 Implement Financial Tools
+#### 2.1.4 Jina Search Integration
 
 **Files to create:**
-- `lib/financial/tools/index.ts`: Financial tool integration
-- `lib/financial/api/client.ts`: API client for financialdatasets.ai
-- `lib/financial/types.ts`: Financial data type definitions
+- `lib/search/providers/jina.ts`: Jina search implementation
+- `lib/search/providers/jina-reader.ts`: Jina Reader API integration
+- `lib/search/grounding-jina.ts`: Jina grounding implementation
+- `lib/search/reranking-jina.ts`: Jina reranker integration
+- `lib/search/segmenter-jina.ts`: Jina content segmentation
 
+**Jina Search Provider Implementation:**
 ```typescript
-// lib/financial/tools/index.ts example
-import { z } from "zod";
-import { toolRegistry } from "../../tools/registry";
-import { getStockPrices, getIncomeStatements, getBalanceSheets, getCashFlowStatements, getFinancialMetrics, searchStocksByFilters } from "../api/client";
+// lib/search/providers/jina.ts
+import { SearchOptions, SearchResult } from "./providers";
+import { makeRequestWithRetry } from "./base";
+import { SimpleTokenTracker } from "../tracking";
 
-// Register getStockPrices tool
-toolRegistry.register({
-  name: "getStockPrices",
-  description: "Use this tool to get stock prices and market cap for a company.",
-  parameters: z.object({
-    ticker: z.string().describe("The ticker of the company"),
-    start_date: z.string().describe("The start date (YYYY-MM-DD)"),
-    end_date: z.string().describe("The end date (YYYY-MM-DD)"),
-    interval: z.enum(["second", "minute", "day", "week", "month", "year"]).default("day"),
-    interval_multiplier: z.number().default(1),
-  }),
-  execute: async (params) => {
-    return await getStockPrices(params);
-  },
-  metadata: {
-    source: "financialdatasets.ai",
-    category: "financial",
-  },
-});
-
-// Register other financial tools...
-```
-
-### Phase 3: API and Agent Integration
-
-#### 3.1 Update API Route
-
-**File:** `app/api/chat/route.ts`
-- Replace current implementation with Responses API
-- Add lead orchestrator agent
-- Implement tool registry and calling
-- Set up reasoning configuration
-
-```typescript
-import { NextRequest } from "next/server";
-import { Message, smoothStream, streamText } from "ai";
-import { myProvider } from "@/lib/models";
-import { toolRegistry } from "@/lib/tools/registry";
-import { orchestrateQuery } from "@/lib/agents/orchestrator";
-import { prepareTools } from "@/lib/tools/preparation";
-
-export async function POST(request: NextRequest) {
-  const {
-    messages,
-    selectedModelId,
-    isReasoningEnabled,
-  }: {
-    messages: Array<Message>;
-    selectedModelId: string;
-    isReasoningEnabled: boolean;
-  } = await request.json();
-
-  // Get available tools based on model capabilities
-  const selectedModel = models.find(model => model.id === selectedModelId);
-  const availableTools = prepareTools(selectedModel?.capabilities);
-
-  // Set up reasoning configuration
-  const reasoningConfig = isReasoningEnabled ? {
-    effort: "comprehensive",
-    generate_summary: true,
-    budget_tokens: 12000,
-  } : undefined;
-
-  // Use Responses API with streamText
-  const stream = streamText({
-    system: prompt,
-    providerOptions: {
-      openai: {
-        responses: {
-          enabled: true,
-          reasoning: reasoningConfig,
-          parallel_tool_calls: true,
-        },
-      },
-    },
-    model: myProvider.languageModel(selectedModelId),
-    experimental_tools: tools,
-    experimental_transform: [
-      smoothStream({
-        chunking: "word",
-      }),
-    ],
-    messages,
-  });
-
-  return stream.toDataStreamResponse({
-    sendReasoning: isReasoningEnabled,
-    getErrorMessage: () => {
-      return `An error occurred, please try again!`;
-    },
-  });
-}
-```
-
-#### 3.2 Implement Agent Registry and Orchestrator
-
-**Files to create:**
-- `lib/agents/registry.ts`: Agent registry with specializations
-- `lib/agents/orchestrator.ts`: Lead orchestrator implementation
-- `lib/agents/types.ts`: Agent type definitions
-- `lib/agents/collaboration.ts`: Collaboration protocols
-
-```typescript
-// lib/agents/types.ts example
-export type AgentDomain = "General" | "Financial" | "Scientific" | "Legal" | "Medical" | "Technical" | "Creative";
-export type AgentRole = "Orchestrator" | "Researcher" | "Analyst" | "Writer" | "Critic" | "Specialist";
-
-export interface Agent {
-  name: string;
-  domain: AgentDomain;
-  role: AgentRole;
-  description: string;
-  systemPrompt: string;
-  defaultModel: string;
-  tools: string[]; // Tool names from the registry
-}
-
-// lib/agents/registry.ts example
-import { Agent } from "./types";
-
-class AgentRegistry {
-  private agents: Map<string, Agent> = new Map();
-
-  register(agent: Agent): void {
-    this.agents.set(`${agent.domain}-${agent.role}`, agent);
-  }
-
-  getByDomainAndRole(domain: AgentDomain, role: AgentRole): Agent | undefined {
-    return this.agents.get(`${domain}-${agent.role}`);
-  }
-
-  getBestMatch(query: string): Agent {
-    // Find the best agent based on semantic similarity
-    // For now, return the orchestrator
-    return this.getByDomainAndRole("General", "Orchestrator")!;
-  }
-}
-
-export const agentRegistry = new AgentRegistry();
-
-// Register default agents
-agentRegistry.register({
-  name: "Lead Orchestrator",
-  domain: "General",
-  role: "Orchestrator",
-  description: "Coordinates the overall workflow and delegates to specialized agents.",
-  systemPrompt: "You are a Lead Orchestrator agent responsible for breaking down complex queries...",
-  defaultModel: "gpt-4o",
-  tools: ["search"],
-});
-
-// Register other agents...
-```
-
-### Phase 4: Frontend Integration
-
-#### 4.1 Update Chat Component
-
-**File:** `components/chat.tsx`
-- Add support for OpenAI models
-- Enable reasoning visualization
-- Maintain existing UI layout
-
-```tsx
-// Snippet of changes to components/chat.tsx
-import { useState } from "react";
-import { useChat } from "@ai-sdk/react";
-import { models } from "@/lib/models";
-// Other imports...
-
-export function Chat() {
-  const [input, setInput] = useState<string>("");
-  const [selectedModelId] = useState<string>("gpt-4o"); // Default to GPT-4o
-  const [isReasoningEnabled, setIsReasoningEnabled] = useState<boolean>(true);
-
-  const selectedModel = models.find((model) => model.id === selectedModelId);
-
-  const { messages, append, status, stop } = useChat({
-    id: "primary",
-    body: {
-      selectedModelId,
-      isReasoningEnabled,
-    },
-    onError: () => {
-      toast.error("An error occurred, please try again!");
-    },
-  });
-
-  // Rest of the component remains similar
-  // ...
-}
-```
-
-#### 4.2 Update Messages Component
-
-**File:** `components/messages.tsx`
-- Enhance for reasoning steps display
-- Add citation rendering
-- Maintain current UI aesthetic
-
-```tsx
-// Snippet of changes to components/messages.tsx
-// Add support for citations and sources
-interface SourceCitation {
-  url: string;
-  title?: string;
-  provider: string;
-}
-
-interface MessageWithSources extends UIMessage {
-  sources?: SourceCitation[];
-}
-
-// Add citation component
-function Citation({ source }: { source: SourceCitation }) {
-  return (
-    <div className="text-xs text-zinc-500 mt-1 flex items-center">
-      <a 
-        href={source.url} 
-        target="_blank" 
-        rel="noopener noreferrer"
-        className="underline hover:text-zinc-800 dark:hover:text-zinc-300 flex items-center"
-      >
-        {source.title || source.url}
-        <span className="ml-1 text-[10px] bg-zinc-200 dark:bg-zinc-800 px-1 rounded">
-          {source.provider}
-        </span>
-      </a>
-    </div>
-  );
-}
-
-// Update to support sources in the message content
-export function MessageContent({ message }: { message: MessageWithSources }) {
-  // Existing code...
+export async function searchWithJina(options: SearchOptions): Promise<SearchResult[]> {
+  const { query, timeoutMs = 15000 } = options;
+  const tracker = new SimpleTokenTracker();
   
-  // Add sources if available
-  return (
-    <div>
-      {/* Existing markdown rendering */}
-      <Markdown components={markdownComponents}>
-        {message.content}
-      </Markdown>
+  return await makeRequestWithRetry(
+    async () => {
+      // Use Jina Search API (s.reader) to get search results
+      const response = await fetch('https://s.jina.ai/', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.JINA_API_KEY}`, // Get your Jina AI API key for free: https://jina.ai/?sui=apikey
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-With-Links-Summary': 'true',
+          'X-No-Cache': 'true'
+        },
+        body: JSON.stringify({ 
+          q: query,
+          options: 'Markdown'
+        }),
+        signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined
+      });
       
-      {/* Render sources if available */}
-      {message.sources && message.sources.length > 0 && (
-        <div className="mt-2">
-          <div className="text-xs text-zinc-500 mb-1">Sources:</div>
-          {message.sources.map((source, index) => (
-            <Citation key={index} source={source} />
-          ))}
-        </div>
-      )}
-    </div>
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Jina Search API error (${response.status}): ${text}`);
+      }
+      
+      const data = await response.json();
+      
+      // Add token usage if available
+      if (data.usage?.tokens) {
+        tracker.addTokens(data.usage.tokens, 'jina_search');
+      }
+      
+      // Normalize to common format
+      return data.data.map((item: any) => ({
+        content: item.content || '',
+        url: item.url,
+        title: item.title || '',
+        source: 'jina' as const
+      }));
+    },
+    { 
+      tracker,
+      maxRetries: 2,
+      retryDelay: 1500,
+      retryableErrors: [/rate limit/, /timeout/, /socket hang up/, /ECONNRESET/, /502/, /503/, /504/]
+    }
   );
 }
 ```
 
-### Phase 5: Memory and Collaboration System
-
-#### 5.1 Implement Memory System
-
-**Files to create:**
-- `lib/memory/index.ts`: Memory system implementation
-- `lib/memory/types.ts`: Memory type definitions
-- `lib/memory/storage.ts`: Storage implementation
-
+**Jina Reader Integration:**
 ```typescript
-// lib/memory/types.ts example
-export type MemoryType = "SESSION" | "USER_PREFERENCE" | "CONVERSATION" | "DOMAIN_KNOWLEDGE" | "TOOL_USAGE";
+// lib/search/providers/jina-reader.ts
+import { makeRequestWithRetry } from "./base";
+import { SimpleTokenTracker } from "../tracking";
 
-export interface MemoryEntry {
-  id: string;
-  type: MemoryType;
+export interface ReaderOptions {
+  url: string;
+  format?: 'markdown' | 'html' | 'text';
+  withLinks?: boolean;
+  withImages?: boolean;
+  noCache?: boolean;
+  removeSelectors?: string[];
+  targetSelectors?: string[];
+  waitForSelectors?: string[];
+  timeout?: number;
+}
+
+export interface ReaderResult {
   content: string;
-  metadata?: Record<string, any>;
-  embedding?: number[];
-  createdAt: Date;
-  expiresAt?: Date;
+  title?: string;
+  description?: string;
+  links?: Record<string, string>;
+  images?: Record<string, string>;
+  url: string;
+  tokens?: number;
 }
 
-// lib/memory/index.ts example
-import { MemoryEntry, MemoryType } from "./types";
-import { createMemoryStorage } from "./storage";
+export async function readContentWithJina(options: ReaderOptions): Promise<ReaderResult> {
+  const { 
+    url, 
+    format = 'markdown',
+    withLinks = true,
+    withImages = false,
+    noCache = false,
+    removeSelectors = [],
+    targetSelectors = [],
+    waitForSelectors = [],
+    timeout = 15
+  } = options;
+  
+  const tracker = new SimpleTokenTracker();
+  
+  return await makeRequestWithRetry(
+    async () => {
+      // Prepare headers
+      const headers: Record<string, string> = {
+        'Authorization': `Bearer ${process.env.JINA_API_KEY}`, // Get your Jina AI API key for free: https://jina.ai/?sui=apikey
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      };
+      
+      // Add optional headers
+      if (withLinks) headers['X-With-Links-Summary'] = 'true';
+      if (withImages) headers['X-With-Images-Summary'] = 'true';
+      if (noCache) headers['X-No-Cache'] = 'true';
+      if (removeSelectors.length) headers['X-Remove-Selector'] = removeSelectors.join(',');
+      if (targetSelectors.length) headers['X-Target-Selector'] = targetSelectors.join(',');
+      if (waitForSelectors.length) headers['X-Wait-For-Selector'] = waitForSelectors.join(',');
+      if (timeout) headers['X-Timeout'] = timeout.toString();
+      
+      // Set return format
+      if (format) {
+        headers['X-Return-Format'] = format;
+      }
+      
+      const response = await fetch('https://r.jina.ai/', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ url })
+      });
+      
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Jina Reader API error (${response.status}): ${text}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.usage?.tokens) {
+        tracker.addTokens(data.usage.tokens, 'jina_reader');
+      }
+      
+      return {
+        content: data.data.content || '',
+        title: data.data.title || '',
+        description: data.data.description || '',
+        links: data.data.links || {},
+        images: data.data.images || {},
+        url: data.data.url || url,
+        tokens: data.usage?.tokens
+      };
+    },
+    { 
+      tracker,
+      maxRetries: 2,
+      retryDelay: 2000,
+      retryableErrors: [/rate limit/, /timeout/, /socket hang up/, /ECONNRESET/, /502/, /503/, /504/]
+    }
+  );
+}
+```
 
-class MemorySystem {
-  private storage = createMemoryStorage();
+**Jina Reranker Integration:**
+```typescript
+// lib/search/reranking-jina.ts
+import { SearchResult } from "./providers";
+import { makeRequestWithRetry } from "./providers/base";
+import { SimpleTokenTracker } from "./tracking";
 
-  async store(type: MemoryType, content: string, metadata?: Record<string, any>, ttlMs?: number): Promise<string> {
-    const id = crypto.randomUUID();
-    const entry: MemoryEntry = {
-      id,
-      type,
-      content,
-      metadata,
-      createdAt: new Date(),
-      expiresAt: ttlMs ? new Date(Date.now() + ttlMs) : undefined,
-    };
+export interface RerankOptions {
+  query: string;
+  documents: string[] | SearchResult[];
+  model?: string;
+  topN?: number;
+  returnDocuments?: boolean;
+}
+
+export interface RerankResult {
+  index: number;
+  score: number;
+  document?: string | SearchResult;
+}
+
+export async function rerankWithJina(options: RerankOptions): Promise<RerankResult[]> {
+  const { 
+    query, 
+    documents, 
+    model = 'jina-reranker-v2-base-multilingual',
+    topN = documents.length,
+    returnDocuments = true 
+  } = options;
+  
+  const tracker = new SimpleTokenTracker();
+  
+  // Prepare documents for the API
+  const processedDocuments = documents.map(doc => {
+    if (typeof doc === 'string') {
+      return doc;
+    } else {
+      return doc.content;
+    }
+  });
+  
+  return await makeRequestWithRetry(
+    async () => {
+      const response = await fetch('https://api.jina.ai/v1/rerank', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.JINA_API_KEY}`, // Get your Jina AI API key for free: https://jina.ai/?sui=apikey
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          query,
+          documents: processedDocuments,
+          top_n: topN,
+          return_documents: returnDocuments
+        })
+      });
+      
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Jina Reranker API error (${response.status}): ${text}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.usage?.total_tokens) {
+        tracker.addTokens(data.usage.total_tokens, 'jina_reranker');
+      }
+      
+      return data.results.map((result: any, index: number) => ({
+        index: result.index,
+        score: result.relevance_score,
+        document: returnDocuments ? (
+          typeof documents[result.index] === 'string' 
+            ? result.document.text 
+            : documents[result.index]
+        ) : undefined
+      }));
+    },
+    { 
+      tracker,
+      maxRetries: 2,
+      retryDelay: 1000
+    }
+  );
+}
+```
+
+**Jina Grounding Integration:**
+```typescript
+// lib/search/grounding-jina.ts
+import { makeRequestWithRetry } from "./providers/base";
+import { SimpleTokenTracker } from "./tracking";
+
+export interface GroundingOptions {
+  statement: string;
+  sites?: string[];
+  noCache?: boolean;
+}
+
+export interface GroundingReference {
+  url: string;
+  keyQuote: string;
+  isSupportive: boolean;
+}
+
+export interface GroundingResult {
+  factuality: number;
+  result: boolean;
+  reason: string;
+  references: GroundingReference[];
+  tokens?: number;
+}
+
+export async function groundWithJina(options: GroundingOptions): Promise<GroundingResult> {
+  const { statement, sites = [], noCache = false } = options;
+  const tracker = new SimpleTokenTracker();
+  
+  return await makeRequestWithRetry(
+    async () => {
+      // Prepare headers
+      const headers: Record<string, string> = {
+        'Authorization': `Bearer ${process.env.JINA_API_KEY}`, // Get your Jina AI API key for free: https://jina.ai/?sui=apikey
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      };
+      
+      // Add optional headers
+      if (sites.length > 0) {
+        headers['X-Site'] = sites.join(',');
+      }
+      
+      if (noCache) {
+        headers['X-No-Cache'] = 'true';
+      }
+      
+      const response = await fetch('https://g.jina.ai/', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ statement })
+      });
+      
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Jina Grounding API error (${response.status}): ${text}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.usage?.tokens) {
+        tracker.addTokens(data.usage.tokens, 'jina_grounding');
+      }
+      
+      return {
+        factuality: data.data.factuality,
+        result: data.data.result,
+        reason: data.data.reason,
+        references: data.data.references,
+        tokens: data.usage?.tokens
+      };
+    },
+    { 
+      tracker,
+      maxRetries: 1, // Ground truth verification is expensive, limit retries
+      retryDelay: 2000,
+      retryableErrors: [/timeout/, /socket hang up/, /ECONNRESET/, /502/, /503/, /504/]
+    }
+  );
+}
+```
+
+**Jina Segmenter Integration:**
+```typescript
+// lib/search/segmenter-jina.ts
+import { makeRequestWithRetry } from "./providers/base";
+import { SimpleTokenTracker } from "./tracking";
+
+export interface SegmenterOptions {
+  content: string;
+  tokenizer?: 'cl100k_base' | 'o200k_base' | 'p50k_base' | 'r50k_base' | 'p50k_edit' | 'gpt2';
+  returnTokens?: boolean;
+  returnChunks?: boolean;
+  maxChunkLength?: number;
+  head?: number;
+  tail?: number;
+}
+
+export interface SegmenterResult {
+  numTokens: number;
+  tokenizer: string;
+  chunks?: string[];
+  chunkPositions?: [number, number][];
+  tokens?: any[][];
+}
+
+export async function segmentWithJina(options: SegmenterOptions): Promise<SegmenterResult> {
+  const { 
+    content, 
+    tokenizer = 'cl100k_base',
+    returnTokens = false,
+    returnChunks = true,
+    maxChunkLength = 1000,
+    head,
+    tail
+  } = options;
+  
+  const tracker = new SimpleTokenTracker();
+  
+  return await makeRequestWithRetry(
+    async () => {
+      const response = await fetch('https://segment.jina.ai/', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.JINA_API_KEY}`, // Get your Jina AI API key for free: https://jina.ai/?sui=apikey
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          content,
+          tokenizer,
+          return_tokens: returnTokens,
+          return_chunks: returnChunks,
+          max_chunk_length: maxChunkLength,
+          ...(head !== undefined && { head }),
+          ...(tail !== undefined && { tail })
+        })
+      });
+      
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Jina Segmenter API error (${response.status}): ${text}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.usage?.tokens) {
+        tracker.addTokens(data.usage.tokens, 'jina_segmenter');
+      }
+      
+      return {
+        numTokens: data.num_tokens,
+        tokenizer: data.tokenizer,
+        chunks: data.chunks,
+        chunkPositions: data.chunk_positions,
+        tokens: data.tokens
+      };
+    },
+    { 
+      tracker,
+      maxRetries: 2,
+      retryDelay: 1000
+    }
+  );
+}
+```
+
+**Enhanced Provider Selection with Jina:**
+```typescript
+// lib/search/providers/index.ts
+export function determineProviderPriority(query: string): SearchProvider[] {
+  // Multilingual queries prioritize Jina
+  if (/[^\x00-\x7F]/.test(query)) {
+    return ['jina', 'openai', 'perplexity', 'serper', 'firecrawl'];
+  }
+  
+  // Financial queries prioritize specialized providers
+  if (/stock|market|finance|price|company|earnings|dividend/i.test(query)) {
+    return ['jina', 'perplexity', 'openai', 'serper', 'firecrawl'];
+  }
+  
+  // News queries prioritize fresh content
+  if (/news|latest|recent|today|yesterday|update|announcement/i.test(query)) {
+    return ['openai', 'jina', 'serper', 'perplexity', 'firecrawl'];
+  }
+  
+  // Technical queries prioritize different providers
+  if (/code|programming|technical|software|library|framework|api/i.test(query)) {
+    return ['perplexity', 'jina', 'openai', 'serper', 'firecrawl'];
+  }
+  
+  // Default priority for general queries
+  return ['openai', 'jina', 'perplexity', 'serper', 'firecrawl'];
+}
+```
+
+#### 2.1.5 Integration Example for Advanced Jina Features
+
+**Comprehensive Search with Jina-Enhanced Pipeline:**
+```typescript
+// lib/search/advanced-jina-search.ts
+import { search, SearchOptions, SearchResult } from "./providers";
+import { rerankWithJina } from "./reranking-jina";
+import { readContentWithJina } from "./providers/jina-reader";
+import { groundWithJina } from "./grounding-jina";
+import { segmentWithJina } from "./segmenter-jina";
+import { deduplicateResults } from "./deduplication";
+import { SearchMetadataCollector } from "./metadata";
+
+export async function performComprehensiveSearch(query: string): Promise<{
+  results: SearchResult[];
+  groundedAnswer?: string;
+  isFactual?: boolean;
+  reason?: string;
+  metadata: any;
+}> {
+  const metadataCollector = new SearchMetadataCollector();
+  metadataCollector.setQueryRewritten(true, query);
+  
+  try {
+    // Step 1: Perform initial search
+    const searchResults = await search({ query, provider: 'jina' });
+    metadataCollector.addProvider('jina');
+    metadataCollector.setTotalResults(searchResults.length);
     
-    await this.storage.set(id, entry);
-    return id;
-  }
-
-  async retrieve(id: string): Promise<MemoryEntry | undefined> {
-    return this.storage.get(id);
-  }
-
-  async searchSimilar(content: string, type?: MemoryType, limit = 5): Promise<MemoryEntry[]> {
-    // Implementation with embeddings would go here
-    // For now, return recent entries of the specified type
-    const entries = await this.storage.getAll();
-    return entries
-      .filter(entry => !type || entry.type === type)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-      .slice(0, limit);
-  }
-}
-
-export const memorySystem = new MemorySystem();
-```
-
-#### 5.2 Implement Collaboration Protocols
-
-**Files to create:**
-- `lib/agents/collaboration/sequential.ts`: Sequential execution
-- `lib/agents/collaboration/parallel.ts`: Parallel execution
-- `lib/agents/collaboration/debate.ts`: Debate protocol
-- `lib/agents/collaboration/consensus.ts`: Consensus building
-
-```typescript
-// lib/agents/collaboration/sequential.ts example
-import { Agent } from "../types";
-import { Message } from "ai";
-import { myProvider } from "@/lib/models";
-import { generateText } from "ai";
-
-export async function sequentialExecution(
-  agents: Agent[],
-  initialMessages: Message[],
-  context?: Record<string, any>
-): Promise<{ result: string; intermediateSteps: Array<{ agent: Agent; output: string }> }> {
-  let currentMessages = [...initialMessages];
-  const intermediateSteps: Array<{ agent: Agent; output: string }> = [];
-
-  for (const agent of agents) {
-    // Generate response from this agent
-    const response = await generateText({
-      model: myProvider.languageModel(agent.defaultModel),
-      system: agent.systemPrompt,
-      messages: currentMessages,
+    // Early return if no results
+    if (searchResults.length === 0) {
+      return { results: [], metadata: metadataCollector.finalize() };
+    }
+    
+    // Step 2: Rerank results for better relevance
+    const rerankedResults = await rerankWithJina({
+      query,
+      documents: searchResults,
+      topN: Math.min(5, searchResults.length)
     });
-
-    // Store the intermediate step
-    intermediateSteps.push({
-      agent,
-      output: response.content,
-    });
-
-    // Add this response to the messages for the next agent
-    currentMessages.push({
-      role: "assistant",
-      content: response.content,
-    });
-  }
-
-  // The final result is the last agent's output
-  return {
-    result: intermediateSteps[intermediateSteps.length - 1].output,
-    intermediateSteps,
-  };
-}
-```
-
-### Phase 6: Financial UI Components Integration
-
-#### 6.1 Copy and Update UI Components
-
-**Files to copy from gen-ui-finance/ to components/finance/:**
-- `financials-table.tsx`
-- `stock-chart.tsx`
-- `stock-screener-table.tsx`
-- `table.tsx`
-- `ticker-suggestions.tsx`
-
-**File to create:**
-- `lib/tools/ui/index.ts`: UI tool integration
-
-```typescript
-// lib/tools/ui/index.ts example
-import { z } from "zod";
-import { toolRegistry } from "../registry";
-
-// Register createDocument tool
-toolRegistry.register({
-  name: "createDocument",
-  description: "Create a document for a writing activity.",
-  parameters: z.object({
-    title: z.string().describe("The title of the document"),
-    kind: z.enum(["text", "code"]).describe("The kind of document to create"),
-  }),
-  execute: async (params) => {
-    // Implementation would go here
-    const id = crypto.randomUUID();
+    metadataCollector.setRerankingApplied(true);
+    
+    // Create sorted results from reranking
+    const sortedResults = rerankedResults
+      .map(result => searchResults[result.index])
+      .filter(Boolean);
+    
+    // Step 3: For top result, get full content via Reader API
+    if (sortedResults.length > 0) {
+      const topResult = sortedResults[0];
+      try {
+        const fullContent = await readContentWithJina({
+          url: topResult.url,
+          format: 'markdown',
+          withLinks: true
+        });
+        
+        // Enhance top result with full content
+        topResult.content = fullContent.content;
+        if (fullContent.title) topResult.title = fullContent.title;
+        
+        // Perform content segmentation if content is large
+        if (fullContent.content.length > 2000) {
+          const segments = await segmentWithJina({
+            content: fullContent.content,
+            returnChunks: true,
+            maxChunkLength: 1000
+          });
+          
+          // Use the first few segments to update content (to manage token usage)
+          if (segments.chunks && segments.chunks.length > 0) {
+            topResult.content = segments.chunks.slice(0, 3).join('\n\n');
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to enhance top result with Reader API:', error);
+      }
+    }
+    
+    // Step 4: Ground the answer based on the search results
+    let groundedInfo = undefined;
+    let factuality = undefined;
+    let reason = undefined;
+    
+    try {
+      // Construct a statement from the search results
+      const statementFromResults = `Based on the search results, ${query}`;
+      
+      // Ground this statement
+      const grounding = await groundWithJina({
+        statement: statementFromResults,
+        sites: sortedResults.slice(0, 3).map(result => result.url)
+      });
+      
+      groundedInfo = grounding.reason;
+      factuality = grounding.result;
+      reason = grounding.reason;
+      metadataCollector.setGroundingApplied(true);
+    } catch (error) {
+      console.warn('Grounding failed:', error);
+      metadataCollector.setError(`Grounding failed: ${error}`);
+    }
+    
     return {
-      id,
-      title: params.title,
-      kind: params.kind,
-      content: "",
+      results: sortedResults,
+      groundedAnswer: groundedInfo,
+      isFactual: factuality,
+      reason,
+      metadata: metadataCollector.finalize()
     };
-  },
-});
-
-// Register other UI tools...
-```
-
-#### 6.2 Integrate Financial Components
-
-**File to create:**
-- `components/finance/index.tsx`: Component selection and rendering
-
-```tsx
-// components/finance/index.tsx example
-import dynamic from "next/dynamic";
-import { useState, useEffect } from "react";
-
-// Dynamically import components to reduce initial bundle size
-const FinancialsTable = dynamic(() => import("./financials-table"));
-const StockChart = dynamic(() => import("./stock-chart"));
-const StockScreenerTable = dynamic(() => import("./stock-screener-table"));
-const TickerSuggestions = dynamic(() => import("./ticker-suggestions"));
-
-export type FinanceComponentType = 
-  | "financials-table"
-  | "stock-chart"
-  | "stock-screener-table"
-  | "ticker-suggestions";
-
-interface FinanceComponentProps {
-  type: FinanceComponentType;
-  data: any;
-}
-
-export function FinanceComponent({ type, data }: FinanceComponentProps) {
-  switch (type) {
-    case "financials-table":
-      return <FinancialsTable data={data} />;
-    case "stock-chart":
-      return <StockChart data={data} />;
-    case "stock-screener-table":
-      return <StockScreenerTable data={data} />;
-    case "ticker-suggestions":
-      return <TickerSuggestions data={data} />;
-    default:
-      return <div>Unknown component type</div>;
+  } catch (error) {
+    console.error('Comprehensive search failed:', error);
+    metadataCollector.setError(`Comprehensive search failed: ${error}`);
+    return {
+      results: [],
+      metadata: metadataCollector.finalize()
+    };
   }
 }
 ```
@@ -1348,6 +1491,11 @@ export function FinanceComponent({ type, data }: FinanceComponentProps) {
     - [ ] Grounding mechanism for validation
     - [ ] Cross-provider fallback strategies
     - [ ] Token usage tracking and metadata collection
+    - [ ] Jina search provider integration with multilingual support
+    - [ ] Jina reader API integration for comprehensive content extraction
+    - [ ] Jina re-ranker implementation for improved result relevance
+    - [ ] Jina grounding API integration for fact-checking
+    - [ ] Jina segmenter API integration for content chunking
   - [ ] Financial tools integrated
   - [ ] UI tools integrated
 
@@ -1486,7 +1634,7 @@ export function agentAsTool(agent: Agent, toolName: string, toolDescription: str
 // Usage example
 // lib/tools/agentTools.ts
 import { financialAnalystAgent, researchAgent from '@/lib/agents/registry';
-import { agentAsTool from '@/lib/agents/AgentExtensions';
+import { agentAsTool } from '@/lib/agents/AgentExtensions';
 
 export const financialAnalysisTool = agentAsTool(
   financialAnalystAgent,
